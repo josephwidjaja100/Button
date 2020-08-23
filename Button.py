@@ -1,13 +1,37 @@
 from tkinter import *
-from PIL import ImageTk, Image
-#http://www.krivers.net/15112-f18/notes/notes-animations-part2.html
+import cv2
+import numpy as np
+from PIL import ImageGrab
+from PIL import Image, ImageTk
+# Open Source Template: http://www.krivers.net/15112-f18/notes/notes-animations-part2.html
+
 ####################################
 # customize these functions
 ####################################
-#Idea:
 
 def init(data):
-# data comes preset with width and height, from the run function
+    # load data.xyz as appropriate
+    data.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    data.eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
+    data.screen = ImageGrab.grab(bbox=(0,0,1366,768))
+    data.screen_np = np.array(data.screen)
+    data.frame = cv2.cvtColor(data.screen_np, cv2.COLOR_BGR2RGB)
+    data.frameTk = Image.fromarray(data.frame)
+    data.frameTk = ImageTk.PhotoImage(image = data.frameTk)
+    data.faces = data.face_cascade.detectMultiScale(data.frame)
+    data.cap = cv2.VideoCapture(0)
+    data.fail = [False for _ in range(50)]
+    data.timerCount = [0 for _ in range(50)]
+    data.eyeCount = [0 for _ in range(50)]
+    data.facesRead = False
+    data.crop = None
+    data.resized = False
+    data.error = [False for _ in range(50)]
+    data.errorCoords = [None for _ in range(50)]
+    data.errorColor = (255,0,0)
+    data.color = (0,0,0)
+    data.change = [False for _ in range(50)]
+    data.locked = False
     data.circleSize = min(data.width,data.height) / 10
     data.circleX = data.width/2
     data.circleY = data.height/2
@@ -15,40 +39,93 @@ def init(data):
     data.keysymText = ""
     data.Toggle = ImageTk.PhotoImage(Image.open("Toggle.png"))
     data.On = ImageTk.PhotoImage(Image.open("NewOn.png"))
-
     data.Off = ImageTk.PhotoImage(Image.open("NewOff.png"))
     data.isClass = False
     data.togX = 27
     data.togY = 25
     data.needChange = False
+
 def mousePressed(event, data):
-
-    data.circleX = event.x
-    data.circleY = event.y
-
-    #is the mouse hovering over the button?
+    # use event.x and event.y
     if (not(data.needChange)):
         if(event.x >= 27 and event.x <= 86 and event.y >= 25 and event.y <=61):
-            if (data.isClass):
-                data.isClass = False
+            if (data.facesRead):
+                data.facesRead = False
                 data.needChange = True
             else:
-                data.isClass = True
+                data.facesRead = True
 
                 data.needChange = True
+
 def keyPressed(event, data):
-    data.charText = event.char
-    data.keysymText = event.keysym
+    # use event.char and event.keysym
+    if(event.keysym == "space"):
+        data.facesRead = True
+
 def timerFired(data):
-    pass
+
+    data.screen = ImageGrab.grab(bbox=(0,0,1366,768))
+    data.screen_np = np.array(data.screen)
+    data.frame = data.screen_np
+
+    data.frame = cv2.resize(data.frame, (683, 384))
+
+    if(data.facesRead == True):
+        if(data.locked == False):
+            data.faces = data.face_cascade.detectMultiScale(data.frame)
+            data.eyeCount = [0]*50
+            data.locked = True
+
+        for (x, y, w, h) in data.faces:
+            data.eyeCount = [0] * 50
+            i = 0
+            cv2.rectangle(data.frame, (x, y), (x+w, y+h), (0, 0, 0), 2)
+
+            eyes = data.eye_cascade.detectMultiScale(data.frame, 1.05, 1)
+
+            for (a,b,c,d) in eyes:
+                if(x < a < x+w and y < b < y+h and x < a+c < x+w and y < b+d < y+h and data.eyeCount[i] < 2 and y < b < (2*y+h)/2):
+                    data.eyeCount[i] += 1
+                    cv2.rectangle(data.frame, (a,b), (a+c, b+d), (0,0,0), 2)
+
+                    if(data.eyeCount[i] == 2):
+                        data.fail[i] = False
+                        data.timerCount[i] = 0
+
+            if(data.eyeCount[i] < 2):
+                cv2.putText(data.frame, "Not Paying Attention", (x, y - 5), cv2.FONT_HERSHEY_COMPLEX_SMALL, 1, data.color, 2, cv2.LINE_AA)
+                data.fail[i] = True
+            i += 1
+
+    data.frameTk = Image.fromarray(data.frame)
+    data.frameTk = ImageTk.PhotoImage(image = data.frameTk)
+
+def timerAttention(data):
+    for i in range(len(data.fail)):
+        if(data.fail[i] == True):
+            try:
+                data.timerCount[i] += 1
+            except:
+                break
+
+    for i in range(len(data.timerCount)):
+        if(data.fail[i] == True and data.timerCount[i] >= 50):
+            data.error[i] = True
+            data.errorCoords[i] = data.faces[i]
 
 def redrawAll(canvas, data):
+    # draw in canvas
+    canvas.create_image(0, 0, anchor=NW, image=data.frameTk)
 
-    '''
-    if(data.circleX >= 27 and data.circleX <= 409 and data.circleY >= 27 and data.circleY <=109):
-        data.On = Image.resize(168 + data.rsa, 36 + data.rsa)
-    '''
-    if (data.isClass):
+    for i in range(len(data.errorCoords)):
+
+        if(data.error[i] == True):
+            canvas.create_rectangle(data.errorCoords[i][0], data.errorCoords[i][1], data.errorCoords[i][0] + data.errorCoords[i][2], data.errorCoords[i][1] + data.errorCoords[i][3], outline = "red", width = 5)
+            data.change[i] = True
+        else:
+            break
+
+    if (data.facesRead):
         canvas.create_image(27, 25, anchor=NW, image=data.On)
     else:
         canvas.create_image(27, 25, anchor=NW, image=data.Off)
@@ -70,31 +147,9 @@ def redrawAll(canvas, data):
                 data.togX = 30
             if (data.togX == 50):
                 data.togX = 35
-        '''
-    if (data.needChange):
-        if (data.togX == 41):
-            data.togX = 50
-            data.needChange = False
-        if (data.togX == 27):
-            data.togX = 41
 
-        if (data.needChange):
-            if (data.togX == 36):
-                data.togX = 27
-                data.needChange = False
-            if (data.togX == 50):
-                data.togX = 36
-        '''
     canvas.create_image(data.togX, data.togY, anchor=NW, image=data.Toggle)
 
-    """
-    if data.charText != "":
-        canvas.create_text(data.width/10, data.height/3,
-                           text="char: " + data.charText)
-    if data.keysymText != "":
-        canvas.create_text(data.width/10, data.height*2/3,
-                           text="keysym: " + data.keysymText)
-    """
 ####################################
 # use the run function as-is
 ####################################
@@ -117,6 +172,7 @@ def run(width=300, height=300):
 
     def timerFiredWrapper(canvas, data):
         timerFired(data)
+        timerAttention(data)
         redrawAllWrapper(canvas, data)
         # pause, then call timerFired again
         canvas.after(data.timerDelay, timerFiredWrapper, canvas, data)
@@ -125,7 +181,7 @@ def run(width=300, height=300):
     data = Struct()
     data.width = width
     data.height = height
-    data.timerDelay = 100 # milliseconds
+    data.timerDelay = 0 # milliseconds
     root = Tk()
     root.resizable(width=False, height=False) # prevents resizing window
     init(data)
